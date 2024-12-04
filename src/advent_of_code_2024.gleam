@@ -2,6 +2,7 @@ import file_streams/file_stream_error
 import gleam/io
 import gleam/list
 import gleam/result
+import gleam/string
 
 import file_streams/file_stream
 
@@ -15,42 +16,49 @@ pub fn main() {
     case challenge() {
       Ok(nil) -> nil
       Error(err) -> {
-        let reason = file_stream_error.describe(err)
-        panic as reason
+        case err {
+          Message(msg) -> panic as msg
+        }
       }
     }
   })
 }
 
-pub fn challenge_1() -> Result(Nil, _) {
+pub fn challenge_1() -> Result(Nil, Error) {
   let file_name = "challenge_1.txt"
-  use file <- result.try(file_stream.open_read(file_name))
+  let open_read_result =
+    file_stream.open_read(file_name)
+    |> result.map_error(file_stream_error_to_error)
 
-  for_each_line(file, io.println)
+  use file <- result.try(open_read_result)
+  use line <- result.try(for_each_line(file))
+
+  let r: Result(#(String, String), Nil) = string.split_once("", "")
+  use #(left, right) <- result.try(r)
+
+  Ok(Nil)
 }
 
 pub fn for_each_line(
   stream: file_stream.FileStream,
-  func: fn(String) -> Nil,
-) -> Result(Nil, _) {
-  use result <- if_not_eof(file_stream.read_line(stream))
-  use line <- result.try(result)
-  func(line)
-  for_each_line(stream, func)
+  func: fn(String) -> Result(a, e),
+) -> Result(a, ForEachError(e)) {
+  case file_stream.read_line(stream) {
+    Error(file_stream_error.Eof) -> Error(Done)
+    Ok(str) -> {
+      use _ <- result.try(func(str) |> result.map_error(ForEachError))
+      use a <- result.try(for_each_line(stream, func))
+      Ok(a)
+    }
+    e -> Error(ForEachError(e))
+  }
 }
 
-fn if_not_eof(
-  r: Result(a, file_stream_error.FileStreamError),
-  func: fn(Result(a, file_stream_error.FileStreamError)) ->
-    Result(Nil, file_stream_error.FileStreamError),
-) -> Result(_, _) {
-  case r {
-    Ok(_) -> func(r)
-    Error(err) -> {
-      case err {
-        file_stream_error.Eof -> Ok(Nil)
-        _ -> Error(err)
-      }
-    }
-  }
+pub type ForEachError(err) {
+  Done
+  ForEachError(err)
+}
+
+fn file_stream_error_to_error(err: file_stream_error.FileStreamError) -> Error {
+  Message(file_stream_error.describe(err))
 }
